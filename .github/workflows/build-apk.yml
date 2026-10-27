@@ -1,0 +1,54 @@
+name: Build ByeByeDPI Pilot APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download upstream source with native submodules
+        run: |
+          git clone --recursive --depth 1 https://github.com/EwenLoy/ByeByeDPI-x-tg.git source
+          test -f source/app/src/main/cpp/byedpi/conev.c
+          test -f source/app/src/main/jni/hev-socks5-tunnel/Android.mk
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Apply Pilot 3 separate-app changes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path("source/app/build.gradle.kts")
+          s=p.read_text().replace('applicationId = "io.github.ewenloy.byedpixtg"', 'applicationId = "io.github.ewenloy.byedpixtg.pilot3"')
+          s=s.replace('versionName = "2.0.0"', 'versionName = "2.0.0-pilot3"')
+          p.write_text(s)
+          p=Path("source/app/src/main/res/values/strings.xml")
+          s=p.read_text().replace('<string name="app_name">ByeByeDPI × TG</string>', '<string name="app_name">ByeByeDPI Pilot 3</string>')
+          s=re.sub(r'(<string name="app_name">)[^<]*(</string>)',r'\1ByeByeDPI Pilot 3\2',s)
+          p.write_text(s)
+          p=Path("source/app/src/main/java/io/github/romanvht/byedpi/utility/PreferencesUtils.kt")
+          s=p.read_text().replace('private const val DEFAULT_CMD_ARGS = "-o1 -a1 -r-5+se"', 'private const val DEFAULT_CMD_ARGS = "-d1 -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -r1+s -S -a1 -As -d1 -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -S -a1"')
+          p.write_text(s)
+          PY
+      - name: Install Android SDK and NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "cmake;3.22.1" "ndk;27.2.12479018"
+      - name: Build signed debug APK
+        working-directory: source
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug --stacktrace
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ByeByeDPI-Pilot3-APK
+          path: source/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
